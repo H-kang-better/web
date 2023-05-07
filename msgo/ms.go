@@ -2,6 +2,8 @@ package msgo
 
 import (
 	"fmt"
+	"github.com/H-kang-better/msgo/render"
+	"html/template"
 	"log"
 	"net/http"
 	"strings"
@@ -28,6 +30,8 @@ type router struct {
 
 type Engine struct {
 	*router
+	funcMap    template.FuncMap
+	HTMLRender render.HTMLRender
 }
 
 func (r *routerGroup) Use(middlewares ...MiddlewareFunc) {
@@ -106,14 +110,24 @@ func (r *router) Group(name string) *routerGroup {
 	return g
 }
 
-//func (r *router) Add(name string, handlerFunc HandlerFunc) {
-//	r.handlerFuncMap[name] = handlerFunc
-//}
-
 func New() *Engine {
 	return &Engine{
 		router: &router{},
 	}
+}
+
+func (e *Engine) SetFuncMap(funcMap template.FuncMap) {
+	e.funcMap = funcMap
+}
+
+// LoadTemplate 以 LoadTemplateGlob 方式加载所有模板
+func (e *Engine) LoadTemplate(pattern string) {
+	t := template.Must(template.New("").Funcs(e.funcMap).ParseGlob(pattern))
+	e.SetHtmlTemplate(t)
+}
+
+func (e *Engine) SetHtmlTemplate(t *template.Template) {
+	e.HTMLRender = render.HTMLRender{Template: t}
 }
 
 func (e *Engine) httpRequestHandle(w http.ResponseWriter, r *http.Request) {
@@ -123,8 +137,9 @@ func (e *Engine) httpRequestHandle(w http.ResponseWriter, r *http.Request) {
 		node := group.treeNode.Get(routerName)
 		if node != nil && node.isEnd {
 			ctx := &Context{
-				W: w,
-				R: r,
+				W:      w,
+				R:      r,
+				engine: e,
 			}
 
 			if handler, ok := group.handlerFuncMap[node.routerName][ANY]; ok {
