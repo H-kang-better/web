@@ -1,9 +1,7 @@
 package msgo
 
 import (
-	"encoding/json"
-	"encoding/xml"
-	"fmt"
+	"github.com/H-kang-better/msgo/render"
 	"html/template"
 	"log"
 	"net/http"
@@ -16,31 +14,25 @@ type Context struct {
 	engine *Engine
 }
 
+func (c *Context) Render(code int, r render.Render) error {
+	err := r.Render(c.W)
+	c.W.WriteHeader(code)
+	return err
+}
+
 // HTML 不支持模板的形式
 func (c *Context) HTML(status int, html string) {
-	c.W.Header().Set("Content-Type", "text/html; charset=utf-8")
-	c.W.WriteHeader(status) // 设置返回状态
-	_, err := c.W.Write([]byte(html))
-	if err != nil {
-		log.Println(err)
-	}
+	c.Render(status, &render.HTML{IsTemplate: false, Data: html})
 }
 
 // HTMLTemplate 通过文件名称文件路径加载模板 ParseFiles(fileName...)
 func (c *Context) HTMLTemplate(name string, funcMap template.FuncMap, data any, fileName ...string) {
-	c.W.Header().Set("Content-Type", "text/html; charset=utf-8")
-	t := template.New(name)
-	t.Funcs(funcMap)
-	t, err := t.ParseFiles(fileName...)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	err = t.Execute(c.W, data)
-	if err != nil {
-		log.Println(err)
-	}
+	c.Render(http.StatusOK, &render.HTML{
+		IsTemplate: true,
+		Name:       name,
+		Data:       data,
+		Template:   c.engine.HTMLRender.Template,
+	})
 }
 
 // HTMLTemplateGlob 通过 pattern 匹配，更简单
@@ -61,43 +53,21 @@ func (c *Context) HTMLTemplateGlob(name string, funcMap template.FuncMap, data a
 
 // Template 启动的时候将所有模板加载到内存中，加快访问速度
 func (c *Context) Template(name string, data any) error {
-	c.W.Header().Set("Content-Type", "text/render; charset=utf-8")
-	err := c.engine.HTMLRender.Template.ExecuteTemplate(c.W, name, data)
-	return err
+	return c.Render(http.StatusOK, &render.HTML{
+		Name:       name,
+		Template:   c.engine.HTMLRender.Template,
+		Data:       data,
+		IsTemplate: true})
 }
 
 // JSON 支持返回 json 格式
 func (c *Context) JSON(status int, data any) error {
-	c.W.Header().Set("Content-Type", "application/json; charset=utf-8")
-	c.W.WriteHeader(status)
-	rsp, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	_, err = c.W.Write(rsp)
-	if err != nil {
-		return err
-	}
-	return nil
+	return c.Render(status, &render.JSON{Data: data})
 }
 
 // XML 支持返回 xml 格式
 func (c *Context) XML(status int, data any) error {
-	c.W.Header().Set("Content-Type", "application/xml; charset=utf-8")
-	c.W.WriteHeader(status)
-	//xmlData, err := xml.Marshal(data)
-	//if err != nil {
-	//	return err
-	//}
-	//_, err = c.W.Write(xmlData)
-	//if err != nil {
-	//	return err
-	//}
-	err := xml.NewEncoder(c.W).Encode(data)
-	if err != nil {
-		return err
-	}
-	return nil
+	return c.Render(status, &render.XML{Data: data})
 }
 
 // File 下载文件的需求，需要返回excel文件，word文件等等的
@@ -126,22 +96,18 @@ func (c *Context) FileFromFS(filepath string, fs http.FileSystem) {
 }
 
 // Redirect 重定向页面
-func (c *Context) Redirect(status int, location string) {
-	if (status < http.StatusMultipleChoices || status > http.StatusPermanentRedirect) && status != http.StatusCreated {
-		panic(fmt.Sprintf("Cannot redirect with status code %d", status))
-	}
-	http.Redirect(c.W, c.R, location, status)
+func (c *Context) Redirect(status int, location string) error {
+	return c.Render(status, &render.Redirect{
+		Code:     status,
+		Location: location,
+		Request:  c.R,
+	})
 }
 
 // String 用 value 填充 format 里面的值
-func (c *Context) String(status int, format string, values ...any) (err error) {
-	plainContentType := "text/plain; charset=utf-8"
-	c.W.Header().Set("Content-Type", plainContentType)
-	c.W.WriteHeader(status)
-	if len(values) > 0 {
-		_, err = fmt.Fprintf(c.W, format, values...)
-		return
-	}
-	_, err = c.W.Write(StringToBytes(format))
-	return
+func (c *Context) String(status int, format string, values ...any) error {
+	return c.Render(status, &render.String{
+		Format: format,
+		Data:   values,
+	})
 }
