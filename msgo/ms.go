@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 )
 
 const ANY = "ANY"
@@ -32,6 +33,7 @@ type Engine struct {
 	*router
 	funcMap    template.FuncMap
 	HTMLRender render.HTMLRender
+	pool       sync.Pool
 }
 
 func (r *routerGroup) Use(middlewares ...MiddlewareFunc) {
@@ -111,9 +113,18 @@ func (r *router) Group(name string) *routerGroup {
 }
 
 func New() *Engine {
-	return &Engine{
-		router: &router{},
+	engine := &Engine{
+		router:     &router{},
+		HTMLRender: render.HTMLRender{},
 	}
+	engine.pool.New = func() any {
+		return engine.allocateContext()
+	}
+	return engine
+}
+
+func (e *Engine) allocateContext() any {
+	return &Context{engine: e}
 }
 
 func (e *Engine) SetFuncMap(funcMap template.FuncMap) {
@@ -130,38 +141,37 @@ func (e *Engine) SetHtmlTemplate(t *template.Template) {
 	e.HTMLRender = render.HTMLRender{Template: t}
 }
 
-func (e *Engine) httpRequestHandle(w http.ResponseWriter, r *http.Request) {
-	method := r.Method
+func (e *Engine) httpRequestHandle(ctx *Context) {
+	method := ctx.R.Method
 	for _, group := range e.groups {
-		routerName := SubStringLast(r.RequestURI, "/"+group.groupName)
+		routerName := SubStringLast(ctx.R.URL.Path, "/"+group.groupName)
 		node := group.treeNode.Get(routerName)
 		if node != nil && node.isEnd {
-			ctx := &Context{
-				W:      w,
-				R:      r,
-				engine: e,
-			}
-
+			// 路由匹配上了
 			if handler, ok := group.handlerFuncMap[node.routerName][ANY]; ok {
 				group.methodHandle(node.routerName, ANY, handler, ctx)
 				return
 			}
 
-			if handler, ok := group.handlerFuncMap[node.routerName][r.Method]; ok {
-				group.methodHandle(node.routerName, r.Method, handler, ctx)
+			if handler, ok := group.handlerFuncMap[node.routerName][ctx.R.Method]; ok {
+				group.methodHandle(node.routerName, ctx.R.Method, handler, ctx)
 				return
 			}
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			fmt.Fprintf(w, "%s %s not allowed \n", r.RequestURI, method)
+			ctx.W.WriteHeader(http.StatusMethodNotAllowed)
+			fmt.Fprintf(ctx.W, "%s %s not allowed \n", ctx.R.RequestURI, method)
 			return
 		}
 	}
-	w.WriteHeader(http.StatusNotFound)
-	fmt.Fprintf(w, "%s  not found \n", r.RequestURI)
+	ctx.W.WriteHeader(http.StatusNotFound)
+	fmt.Fprintf(ctx.W, "%s  not found \n", ctx.R.RequestURI)
 }
 
 func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	e.httpRequestHandle(w, r)
+	ctx := e.pool.Get().(*Context)
+	ctx.W = w
+	ctx.R = r
+	e.httpRequestHandle(ctx)
+	e.pool.Put(ctx)
 
 }
 

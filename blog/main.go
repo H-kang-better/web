@@ -9,7 +9,9 @@ import (
 )
 
 type User struct {
-	Name string
+	Name      string   `xml:"name" json:"name" msg:"required"`
+	Age       int      `xml:"age" json:"age"`
+	Addresses []string `xml:"addresses" json:"addresses"`
 }
 
 func main() {
@@ -109,6 +111,52 @@ func main() {
 	g.Get("/String", func(ctx *msgo.Context) {
 		ctx.String(http.StatusOK, "%s 是由 %s 制作 \n", "goweb框架", "码神之路")
 
+	})
+	// test func get value from url
+	g.Get("/add", func(ctx *msgo.Context) {
+		id := ctx.GetQuery("id")
+		name, _ := ctx.GetQueryArray("id")
+		country := ctx.GetDefaultQuery("country", "China")
+		fmt.Println(id)
+		fmt.Println(name)
+		fmt.Println(country)
+		ctx.String(http.StatusOK, "%s 是由 %s 制作 \n", "goweb框架", "码神之路")
+
+	})
+	// test func QueryMap
+	g.Get("/QueryMap", func(ctx *msgo.Context) {
+		userMap := ctx.QueryMap("user")
+		fmt.Println(userMap)
+		ctx.String(http.StatusOK, "%s 是由 %s 制作 \n", "goweb框架", "码神之路")
+	})
+	// test func PostForm
+	g.Post("/PostForm", func(ctx *msgo.Context) {
+		m, _ := ctx.GetPostForm("name")
+		fmt.Println(m)
+		ctx.JSON(http.StatusOK, m)
+	})
+	// test func FormFile
+	g.Post("/FormFile", func(ctx *msgo.Context) {
+		file, err := ctx.FormFile("file")
+		if err != nil {
+			log.Println(err)
+		}
+		err = ctx.SaveUploadedFile(file, "./upload/test.png")
+		if err != nil {
+			log.Println(err)
+		}
+	})
+	// test func DealJson
+	g.Post("/DealJson", func(ctx *msgo.Context) {
+		ctx.DisallowUnknownFields = true
+		ctx.IsValidate = true
+		user := make([]User, 0)
+		err := ctx.DealJson(&user)
+		if err == nil {
+			ctx.JSON(http.StatusOK, user)
+		} else {
+			log.Println(err)
+		}
 	})
 
 	engine.Run()

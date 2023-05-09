@@ -1,23 +1,275 @@
 package msgo
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"github.com/H-kang-better/msgo/render"
 	"html/template"
+	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
+	"reflect"
+	"strings"
 )
 
+const defaultMultipartMemory = 32 << 20 // 32M
+
 type Context struct {
-	W      http.ResponseWriter
-	R      *http.Request
-	engine *Engine
+	W                     http.ResponseWriter
+	R                     *http.Request
+	engine                *Engine
+	queryCache            url.Values
+	formCache             url.Values
+	DisallowUnknownFields bool
+	IsValidate            bool
+}
+
+// initQueryCache 初始化缓存
+func (c *Context) initQueryCache() {
+	if c.R != nil {
+		c.queryCache = c.R.URL.Query()
+	} else {
+		c.queryCache = url.Values{}
+	}
+}
+
+// GetDefaultQuery 没有就返回默认值defaultValue
+func (c *Context) GetDefaultQuery(key, defaultValue string) string {
+	array, ok := c.GetQueryArray(key)
+	if !ok {
+		return defaultValue
+	}
+	return array[0]
+}
+
+// GetQuery 根据 key 值查询到url中对应的 value 值
+func (c *Context) GetQuery(key string) string {
+	c.initQueryCache()
+	return c.queryCache.Get(key)
+}
+
+// GetQueryArray 根据 key 值查询到url中对应的 value切片
+func (c *Context) GetQueryArray(key string) (values []string, ok bool) {
+	c.initQueryCache()
+	values, ok = c.queryCache[key]
+	return
+}
+
+// QueryMap 从url中获取map格式的数据，key为map的名字
+func (c *Context) QueryMap(key string) (dict map[string]string) {
+	dict, _ = c.GetQueryMap(key)
+	return
+}
+
+func (c *Context) GetQueryMap(key string) (map[string]string, bool) {
+	c.initQueryCache()
+	return c.get(c.queryCache, key)
+}
+
+func (c *Context) get(m map[string][]string, key string) (map[string]string, bool) {
+	//user[id]=1&user[name]=张三
+	dict := make(map[string]string)
+	exist := false
+	for k, value := range m {
+		if i := strings.IndexByte(k, '['); i >= 1 && k[0:i] == key {
+			if j := strings.IndexByte(k[i+1:], ']'); j >= 1 {
+				exist = true
+				dict[k[i+1:][:j]] = value[0]
+			}
+		}
+	}
+	return dict, exist
+}
+
+// initPostFormCache 初始化缓存
+func (c *Context) initPostFormCache() {
+	if c.formCache == nil {
+		c.formCache = make(url.Values)
+		if err := c.R.ParseMultipartForm(defaultMultipartMemory); err != nil {
+			if !errors.Is(err, http.ErrNotMultipart) {
+				log.Println(err)
+			}
+		}
+		c.formCache = c.R.PostForm
+	}
+}
+
+func (c *Context) GetPostForm(key string) (string, bool) {
+	if values, ok := c.GetPostFormArray(key); ok {
+		return values[0], ok
+	}
+	return "", false
+}
+
+func (c *Context) PostFormArray(key string) (values []string) {
+	values, _ = c.GetPostFormArray(key)
+	return
+}
+
+func (c *Context) GetPostFormArray(key string) (values []string, ok bool) {
+	c.initPostFormCache()
+	values, ok = c.formCache[key]
+	return
+}
+
+func (c *Context) GetPostFormMap(key string) (map[string]string, bool) {
+	c.initPostFormCache()
+	return c.get(c.formCache, key)
+}
+
+func (c *Context) PostFormMap(key string) (dict map[string]string) {
+	dict, _ = c.GetPostFormMap(key)
+	return
 }
 
 func (c *Context) Render(code int, r render.Render) error {
 	err := r.Render(c.W)
-	c.W.WriteHeader(code)
+	if code != http.StatusOK {
+		c.W.WriteHeader(code)
+	}
 	return err
+}
+
+// FormFile 获取文件形式的数据
+func (c *Context) FormFile(name string) (*multipart.FileHeader, error) {
+	if err := c.R.ParseMultipartForm(defaultMultipartMemory); err != nil {
+		return nil, err
+	}
+	file, header, err := c.R.FormFile(name)
+	if err != nil {
+		return nil, err
+	}
+	err = file.Close()
+	if err != nil {
+		return nil, err
+	}
+	return header, nil
+}
+
+func (c *Context) SaveUploadedFile(file *multipart.FileHeader, dst string) error {
+	src, err := file.Open()
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, src)
+	return err
+}
+
+// MultipartForm 传递多个文件
+func (c *Context) MultipartForm() (*multipart.Form, error) {
+	err := c.R.ParseMultipartForm(defaultMultipartMemory)
+	return c.R.MultipartForm, err
+}
+
+// DealJson 获取文件形式的数据; IsValidate DisallowUnknownFields 用于结构体校验的两个参数
+func (c *Context) DealJson(data any) error {
+	body := c.R.Body
+	if c.R == nil || body == nil {
+		return errors.New("invalid request")
+	}
+	decoder := json.NewDecoder(body)
+	if c.DisallowUnknownFields {
+		decoder.DisallowUnknownFields()
+	}
+	if c.IsValidate {
+		err := validateRequireParam(data, decoder)
+		if err != nil {
+			return err
+		}
+	} else {
+		err := decoder.Decode(data)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateRequireParam 先将所有的参数解析为map，然后和对应的结构体进行比对
+func validateRequireParam(data any, decoder *json.Decoder) error {
+	if data == nil {
+		return nil
+	}
+	valueOf := reflect.ValueOf(data)
+	if valueOf.Kind() != reflect.Pointer {
+		return errors.New("no ptr type")
+	}
+	t := valueOf.Elem().Interface()
+	of := reflect.ValueOf(t)
+	switch of.Kind() {
+	case reflect.Struct:
+		return checkParam(of.Type(), data, decoder)
+	case reflect.Slice, reflect.Array:
+		elem := of.Type().Elem()
+		elemType := elem.Kind()
+		if elemType == reflect.Struct {
+			return checkParamSlice(elem, data, decoder)
+		}
+	default:
+		err := decoder.Decode(data)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+func checkParam(elem reflect.Type, data any, decoder *json.Decoder) error {
+	mapData := make(map[string]interface{}, 0)
+	_ = decoder.Decode(&mapData)
+	if len(mapData) <= 0 {
+		return nil
+	}
+	for i := 0; i < elem.NumField(); i++ {
+		field := elem.Field(i)
+		required := field.Tag.Get("msgo")
+		tag := field.Tag.Get("json")
+		value := mapData[tag]
+		if value == nil && required == "required" {
+			return errors.New(fmt.Sprintf("filed [%s] is required", tag))
+		}
+	}
+	if data != nil {
+		marshal, _ := json.Marshal(mapData)
+		_ = json.Unmarshal(marshal, data)
+	}
+	return nil
+}
+
+func checkParamSlice(elem reflect.Type, data any, decoder *json.Decoder) error {
+	mapData := make([]map[string]interface{}, 0)
+	_ = decoder.Decode(&mapData)
+	if len(mapData) <= 0 {
+		return nil
+	}
+	for i := 0; i < elem.NumField(); i++ {
+		field := elem.Field(i)
+		required := field.Tag.Get("msg")
+		tag := field.Tag.Get("json")
+		for _, v := range mapData {
+			value := v[tag]
+			if value == nil && required == "required" {
+				return errors.New(fmt.Sprintf("filed [%s] is required", tag))
+			}
+		}
+	}
+	if data != nil {
+		marshal, _ := json.Marshal(mapData)
+		_ = json.Unmarshal(marshal, data)
+	}
+	return nil
 }
 
 // HTML 不支持模板的形式
