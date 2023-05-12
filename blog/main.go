@@ -10,7 +10,7 @@ import (
 
 type User struct {
 	Name      string   `xml:"name" json:"name" msg:"required"`
-	Age       int      `xml:"age" json:"age"`
+	Age       int      `xml:"age" json:"age" validate:"required,max=50,min=18"`
 	Addresses []string `xml:"addresses" json:"addresses"`
 }
 
@@ -146,12 +146,22 @@ func main() {
 			log.Println(err)
 		}
 	})
-	// test func DealJson
+	// test func DealJson 或者 BindJson
 	g.Post("/DealJson", func(ctx *msgo.Context) {
 		ctx.DisallowUnknownFields = true
 		ctx.IsValidate = true
 		user := make([]User, 0)
 		err := ctx.DealJson(&user)
+		if err == nil {
+			ctx.JSON(http.StatusOK, user)
+		} else {
+			log.Println(err)
+		}
+	})
+	// test func BindXML
+	g.Post("/xmlParam", func(ctx *msgo.Context) {
+		user := &User{}
+		err := ctx.BindXML(user)
 		if err == nil {
 			ctx.JSON(http.StatusOK, user)
 		} else {

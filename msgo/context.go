@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/H-kang-better/msgo/binding"
 	"github.com/H-kang-better/msgo/render"
 	"html/template"
 	"io"
@@ -134,6 +135,30 @@ func (c *Context) Render(code int, r render.Render) error {
 	return err
 }
 
+func (c *Context) BindJson(obj any) error {
+	jsonBinding := binding.JSON
+	jsonBinding.DisallowUnknownFields = c.DisallowUnknownFields
+	jsonBinding.IsValidate = c.IsValidate
+	return c.MustBindWith(obj, jsonBinding)
+}
+
+func (c *Context) BindXML(obj any) error {
+	return c.MustBindWith(obj, binding.XML)
+}
+
+func (c *Context) MustBindWith(obj any, b binding.Binding) error {
+	//如果发生错误，返回400状态码 参数错误
+	if err := c.ShouldBindWith(obj, b); err != nil {
+		c.W.WriteHeader(http.StatusBadRequest)
+		return err
+	}
+	return nil
+}
+
+func (c *Context) ShouldBindWith(obj any, b binding.Binding) error {
+	return b.Bind(c.R, obj)
+}
+
 // FormFile 获取文件形式的数据
 func (c *Context) FormFile(name string) (*multipart.FileHeader, error) {
 	if err := c.R.ParseMultipartForm(defaultMultipartMemory); err != nil {
@@ -173,7 +198,7 @@ func (c *Context) MultipartForm() (*multipart.Form, error) {
 	return c.R.MultipartForm, err
 }
 
-// DealJson 获取文件形式的数据; IsValidate DisallowUnknownFields 用于结构体校验的两个参数
+// DealJson :BindJson 获取文件形式的数据; IsValidate DisallowUnknownFields 用于结构体校验的两个参数
 func (c *Context) DealJson(data any) error {
 	body := c.R.Body
 	if c.R == nil || body == nil {
@@ -194,7 +219,11 @@ func (c *Context) DealJson(data any) error {
 			return err
 		}
 	}
-	return nil
+	return validate(data)
+}
+
+func validate(obj any) error {
+	return binding.Validator.ValidateStruct(obj)
 }
 
 // validateRequireParam 先将所有的参数解析为map，然后和对应的结构体进行比对
