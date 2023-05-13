@@ -27,6 +27,7 @@ type Context struct {
 	formCache             url.Values
 	DisallowUnknownFields bool
 	IsValidate            bool
+	StatusCode            int
 }
 
 // initQueryCache 初始化缓存
@@ -129,6 +130,7 @@ func (c *Context) PostFormMap(key string) (dict map[string]string) {
 
 func (c *Context) Render(code int, r render.Render) error {
 	err := r.Render(c.W)
+	c.StatusCode = code
 	if code != http.StatusOK {
 		c.W.WriteHeader(code)
 	}

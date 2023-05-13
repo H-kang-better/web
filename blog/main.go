@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"github.com/H-kang-better/msgo"
+	msgoLog "github.com/H-kang-better/msgo/log"
+
 	"html/template"
 	"log"
 	"net/http"
@@ -41,6 +43,8 @@ func main() {
 	//engine.Run()
 	engine := msgo.New()
 	g := engine.Group("user")
+	// 中间件的使用方法
+	g.Use(msgo.Logging)
 	g.Use(func(next msgo.HandlerFunc) msgo.HandlerFunc {
 		return func(ctx *msgo.Context) {
 			fmt.Println("pre handle")
@@ -167,6 +171,17 @@ func main() {
 		} else {
 			log.Println(err)
 		}
+	})
+	// test 分级日志
+	logger := msgoLog.Default()
+	logger.Level = msgoLog.LevelInfo
+	g.Post("/testLog", func(ctx *msgo.Context) {
+		user := &User{}
+		_ = ctx.BindXML(user)
+		logger.Debug("我是debug日志")
+		logger.Info("我是info日志")
+		logger.Error("我是error日志")
+		ctx.JSON(http.StatusOK, user)
 	})
 
 	engine.Run()
