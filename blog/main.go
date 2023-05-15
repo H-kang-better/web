@@ -174,10 +174,19 @@ func main() {
 	})
 	// test 分级日志
 	logger := msgoLog.Default()
-	logger.Level = msgoLog.LevelInfo
+	logger.Formatter = &msgoLog.JsonFormatter{TimeDisplay: true}
+	//logger.Level = msgoLog.LevelDebug
+	//writer, _ := msgoLog.FileWriter("./log/log.log")
+	//logger.Outs = append(logger.Outs, writer)
+	logger.SetLogPath("./log/")
+	logger.LogFileSize = 1 << 10
 	g.Post("/testLog", func(ctx *msgo.Context) {
 		user := &User{}
 		_ = ctx.BindXML(user)
+		logger.WithFields(msgoLog.Fields{
+			"name": "xiaoMing",
+			"id":   100,
+		}).Debug("我是debug日志")
 		logger.Debug("我是debug日志")
 		logger.Info("我是info日志")
 		logger.Error("我是error日志")

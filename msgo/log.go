@@ -70,13 +70,15 @@ func LoggerWithConfig(conf LoggerConfig, next HandlerFunc) HandlerFunc {
 		formatter = defaultLogFormatter
 	}
 	out := conf.out
+	displayColor := false
 	if out == nil {
 		out = DefaultWriter
+		displayColor = true
 	}
 	return func(ctx *Context) {
 		param := LogFormatterParams{
 			Request:        ctx.R,
-			IsDisplayColor: true, // 设置是否开启日志颜色
+			IsDisplayColor: displayColor, // 设置是否开启日志颜色
 		}
 		// Start timer
 		start := time.Now()
