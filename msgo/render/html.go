@@ -20,8 +20,9 @@ type HTML struct {
 
 var htmlContentType = "text/html; charset=utf-8"
 
-func (h *HTML) Render(w http.ResponseWriter) error {
+func (h *HTML) Render(w http.ResponseWriter, code int) error {
 	h.WriteContentType(w)
+	w.WriteHeader(code)
 	if !h.IsTemplate {
 		_, err := w.Write([]byte(h.Data.(string)))
 		return err

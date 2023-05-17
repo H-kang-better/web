@@ -15,8 +15,9 @@ func (j *JSON) WriteContentType(w http.ResponseWriter) {
 	writeContentType(w, jsonContentType)
 }
 
-func (j *JSON) Render(w http.ResponseWriter) error {
+func (j *JSON) Render(w http.ResponseWriter, code int) error {
 	j.WriteContentType(w)
+	w.WriteHeader(code)
 	jsonBytes, err := json.Marshal(j.Data)
 	if err != nil {
 		return err

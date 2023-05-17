@@ -1,10 +1,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/H-kang-better/msgo"
 	msgoLog "github.com/H-kang-better/msgo/log"
-
+	"github.com/H-kang-better/msgo/mserror"
 	"html/template"
 	"log"
 	"net/http"
@@ -41,10 +42,18 @@ func main() {
 	//	fmt.Fprintln(ctx.W, "get order mszlu.com")
 	//})
 	//engine.Run()
-	engine := msgo.New()
+	engine := msgo.Default()
+	engine.RegisterErrorHandler(func(err error) (int, any) {
+		switch e := err.(type) {
+		case *BlogError:
+			return http.StatusOK, e.Response()
+		default:
+			return http.StatusInternalServerError, "Internal Server Error"
+		}
+	})
 	g := engine.Group("user")
 	// 中间件的使用方法
-	g.Use(msgo.Logging)
+	g.Use(msgo.Logging, msgo.Recovery)
 	g.Use(func(next msgo.HandlerFunc) msgo.HandlerFunc {
 		return func(ctx *msgo.Context) {
 			fmt.Println("pre handle")
@@ -173,27 +182,100 @@ func main() {
 		}
 	})
 	// test 分级日志
-	logger := msgoLog.Default()
-	logger.Formatter = &msgoLog.JsonFormatter{TimeDisplay: true}
+	engine.Logger.Level = msgoLog.LevelDebug
+	//engine.Logger.Formatter = &msgoLog.JsonFormatter{TimeDisplay: true}
 	//logger.Level = msgoLog.LevelDebug
 	//writer, _ := msgoLog.FileWriter("./log/log.log")
 	//logger.Outs = append(logger.Outs, writer)
-	logger.SetLogPath("./log/")
-	logger.LogFileSize = 1 << 10
+	engine.Logger.SetLogPath("./log/")
+	engine.Logger.LogFileSize = 1 << 10
+	var u *User
 	g.Post("/testLog", func(ctx *msgo.Context) {
 		user := &User{}
+		u.Age = 10
 		_ = ctx.BindXML(user)
-		logger.WithFields(msgoLog.Fields{
+		ctx.Logger.WithFields(msgoLog.Fields{
 			"name": "xiaoMing",
 			"id":   100,
 		}).Debug("我是debug日志")
-		logger.Debug("我是debug日志")
-		logger.Info("我是info日志")
-		logger.Error("我是error日志")
+		ctx.Logger.Debug("我是debug日志")
+		ctx.Logger.Info("我是info日志")
+		ctx.Logger.Error("我是error日志")
 		ctx.JSON(http.StatusOK, user)
+	})
+	// test 自定义错误处理
+	g.Post("/error", func(ctx *msgo.Context) {
+		user := &User{}
+		_ = ctx.BindXML(user)
+		msError := mserror.Default()
+		msError.Result(func(msError *mserror.MsError) {
+			ctx.Logger.Error(msError.Error())
+			ctx.JSON(http.StatusInternalServerError, user)
+		})
+		a(1, msError)
+		//ret = b(ret, msError)
+		//ret = c(ret, msError)
+		//fmt.Println(ret)
+		ctx.JSON(http.StatusOK, user)
+	})
+	// test http错误
+	g.Post("/httpError", func(ctx *msgo.Context) {
+		user := &User{}
+		_ = ctx.BindXML(user)
+		err := login()
+		ctx.HandlerWithError(http.StatusOK, user, err)
 	})
 
 	engine.Run()
+}
+
+func login() *BlogError {
+	return &BlogError{
+		Success: true,
+		Code:    123,
+		Msg:     "test-msg",
+	}
+}
+
+type BlogError struct {
+	Success bool
+	Code    int64
+	Data    any
+	Msg     string
+}
+
+type BlogNoDataError struct {
+	Success bool
+	Code    int64
+	Msg     string
+}
+
+func (b *BlogError) Error() string {
+	return b.Msg
+}
+
+func (b *BlogError) Fail(code int64, msg string) {
+	b.Success = false
+	b.Code = code
+	b.Msg = msg
+}
+
+func (b *BlogError) Response() any {
+	if b.Data == nil {
+		return &BlogNoDataError{
+			Success: true,
+			Code:    123,
+			Msg:     "test-msg",
+		}
+	}
+	return b
+}
+
+func a(i int, msError *mserror.MsError) {
+	if i == 1 {
+		err := errors.New("a error")
+		msError.Put(err)
+	}
 }
 
 func Log(next msgo.HandlerFunc) msgo.HandlerFunc {

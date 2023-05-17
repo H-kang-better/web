@@ -2,6 +2,7 @@ package msgo
 
 import (
 	"fmt"
+	msLog "github.com/H-kang-better/msgo/log"
 	"github.com/H-kang-better/msgo/render"
 	"html/template"
 	"log"
@@ -27,13 +28,19 @@ type routerGroup struct {
 
 type router struct {
 	groups []*routerGroup
+	engine *Engine
 }
+
+type ErrorHandler func(err error) (int, any)
 
 type Engine struct {
 	*router
-	funcMap    template.FuncMap
-	HTMLRender render.HTMLRender
-	pool       sync.Pool
+	funcMap      template.FuncMap
+	HTMLRender   render.HTMLRender
+	pool         sync.Pool
+	Logger       *msLog.Logger
+	middles      []MiddlewareFunc
+	errorHandler ErrorHandler
 }
 
 func (r *routerGroup) Use(middlewares ...MiddlewareFunc) {
@@ -56,10 +63,6 @@ func (r *routerGroup) methodHandle(name string, method string, h HandlerFunc, ct
 	}
 	h(ctx)
 }
-
-//func (r *routerGroup) Add(name string, handlerFunc HandlerFunc) {
-//	r.handlerFuncMap[name] = handlerFunc
-//}
 
 func (r *routerGroup) handle(name string, method string, handlerFunc HandlerFunc, middlewareFunc ...MiddlewareFunc) {
 	_, ok := r.handlerFuncMap[name]
@@ -108,6 +111,7 @@ func (r *router) Group(name string) *routerGroup {
 		handlerMethodMap:   make(map[string][]string),
 		treeNode:           &treeNode{name: "/", children: make([]*treeNode, 0)},
 	}
+	g.Use(r.engine.middles...)
 	r.groups = append(r.groups, g)
 	return g
 }
@@ -116,10 +120,20 @@ func New() *Engine {
 	engine := &Engine{
 		router:     &router{},
 		HTMLRender: render.HTMLRender{},
+		Logger:     msLog.Default(),
 	}
 	engine.pool.New = func() any {
 		return engine.allocateContext()
 	}
+	return engine
+}
+
+func Default() *Engine {
+	engine := New()
+	engine.Logger = msLog.Default()
+	// 这是两个默认的行为，默认是需要实现的
+	engine.Use(Recovery, Logging)
+	engine.router.engine = engine
 	return engine
 }
 
@@ -170,6 +184,7 @@ func (e *Engine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := e.pool.Get().(*Context)
 	ctx.W = w
 	ctx.R = r
+	ctx.Logger = e.Logger
 	e.httpRequestHandle(ctx)
 	e.pool.Put(ctx)
 
@@ -196,4 +211,12 @@ func (e *Engine) Run() {
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func (e *Engine) Use(middles ...MiddlewareFunc) {
+	e.middles = middles
+}
+
+func (e *Engine) RegisterErrorHandler(handler ErrorHandler) {
+	e.errorHandler = handler
 }

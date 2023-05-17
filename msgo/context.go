@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/H-kang-better/msgo/binding"
+	msLog "github.com/H-kang-better/msgo/log"
 	"github.com/H-kang-better/msgo/render"
 	"html/template"
 	"io"
@@ -28,6 +29,7 @@ type Context struct {
 	DisallowUnknownFields bool
 	IsValidate            bool
 	StatusCode            int
+	Logger                *msLog.Logger
 }
 
 // initQueryCache 初始化缓存
@@ -129,11 +131,9 @@ func (c *Context) PostFormMap(key string) (dict map[string]string) {
 }
 
 func (c *Context) Render(code int, r render.Render) error {
-	err := r.Render(c.W)
+	//c.W.WriteHeader(code)
+	err := r.Render(c.W, code)
 	c.StatusCode = code
-	if code != http.StatusOK {
-		c.W.WriteHeader(code)
-	}
 	return err
 }
 
@@ -393,4 +393,22 @@ func (c *Context) String(status int, format string, values ...any) error {
 		Format: format,
 		Data:   values,
 	})
+}
+
+func (c *Context) Fail(code int, msg string) {
+	c.String(code, msg)
+}
+
+func (c *Context) ErrorHandle(err error) {
+	code, data := c.engine.errorHandler(err)
+	c.JSON(code, data)
+}
+
+func (c *Context) HandlerWithError(code int, obj any, err error) {
+	if err != nil {
+		statusCode, data := c.engine.errorHandler(err)
+		c.JSON(statusCode, data)
+		return
+	}
+	c.JSON(code, obj)
 }
