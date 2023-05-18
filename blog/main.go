@@ -6,9 +6,12 @@ import (
 	"github.com/H-kang-better/msgo"
 	msgoLog "github.com/H-kang-better/msgo/log"
 	"github.com/H-kang-better/msgo/mserror"
+	"github.com/H-kang-better/msgo/mspool"
 	"html/template"
 	"log"
 	"net/http"
+	"sync"
+	"time"
 )
 
 type User struct {
@@ -224,6 +227,42 @@ func main() {
 		_ = ctx.BindXML(user)
 		err := login()
 		ctx.HandlerWithError(http.StatusOK, user, err)
+	})
+	// test 线程池
+	p, _ := mspool.NewPool(1)
+	g.Post("/pool", func(ctx *msgo.Context) {
+		currentTime := time.Now().UnixMilli()
+		var wg sync.WaitGroup
+		wg.Add(5)
+		p.Submit(func() {
+			fmt.Println("111")
+			//panic("test panic of 111")
+			time.Sleep(3 * time.Second)
+			wg.Done()
+		})
+		p.Submit(func() {
+			fmt.Println("222")
+			time.Sleep(3 * time.Second)
+			wg.Done()
+		})
+		p.Submit(func() {
+			fmt.Println("333")
+			time.Sleep(3 * time.Second)
+			wg.Done()
+		})
+		p.Submit(func() {
+			fmt.Println("444")
+			time.Sleep(3 * time.Second)
+			wg.Done()
+		})
+		p.Submit(func() {
+			fmt.Println("555")
+			time.Sleep(3 * time.Second)
+			wg.Done()
+		})
+		wg.Wait()
+		fmt.Println(time.Now().UnixMilli() - currentTime)
+		ctx.JSON(http.StatusOK, "success")
 	})
 
 	engine.Run()
